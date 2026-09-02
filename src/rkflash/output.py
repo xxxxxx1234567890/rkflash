@@ -3,8 +3,12 @@ import sys
 
 
 def emit_json(obj) -> None:
-    """机器可读结果 → stdout JSON（单行）。"""
-    print(json.dumps(obj, ensure_ascii=False, default=str), file=sys.stdout)
+    """机器可读结果 → stdout JSON（单行）。
+
+    ensure_ascii=True：Windows 控制台代码页（GBK 等）下中文不乱码，
+    JSON 转义无损，消费方解析后还原。
+    """
+    print(json.dumps(obj, ensure_ascii=True, default=str), file=sys.stdout)
 
 
 def emit_progress(text: str) -> None:

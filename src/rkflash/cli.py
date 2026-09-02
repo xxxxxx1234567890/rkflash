@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     test = sub.add_parser("test", help="Test Unit Ready 就绪探测")
     test.add_argument("--path", help="设备路径（多设备时必填）")
+
+    sub.add_parser("env-check", help="环境检查（驱动/udev/设备就绪）")
     return p
 
 
@@ -58,6 +60,10 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     transport = args.transport if args.transport != "auto" else _transport()
+    if args.command == "env-check":
+        from .env_check import env_check
+        emit_json(env_check())
+        return 0
     if args.command == "devices":
         try:
             emit_json([vars(d) for d in list_devices(transport)])
