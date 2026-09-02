@@ -70,3 +70,40 @@ def test_write_area_full_block_appends_crc():
     assert t.controls[0][4] == data
     crc = crc16_ibm_3740(data)
     assert t.controls[1][4] == bytes([(crc >> 8) & 0xFF, crc & 0xFF])
+
+
+def test_write_area_tail_4095_pads_then_crc_suffix():
+    t = FakeTransport()
+    data = b"\xBB" * 4095
+    write_area(t, 0x471, data)
+    assert len(t.controls) == 2
+    # 第 1 次：补 1 字节 0 凑满 4096
+    assert t.controls[0][4] == data + b"\x00"
+    # 第 2 次：CRC 覆盖补齐后的 4096 字节，2 字节大端
+    crc = crc16_ibm_3740(data + b"\x00")
+    assert t.controls[1][4] == bytes([(crc >> 8) & 0xFF, crc & 0xFF])
+
+
+def test_write_area_tail_4094_inlines_crc_then_dummy():
+    t = FakeTransport()
+    data = b"\xBB" * 4094
+    write_area(t, 0x471, data)
+    assert len(t.controls) == 2
+    # 第 1 次：数据内联追加 2 字节 CRC，恰凑满 4096
+    crc = crc16_ibm_3740(data)
+    assert t.controls[0][4] == data + bytes([(crc >> 8) & 0xFF, crc & 0xFF])
+    assert len(t.controls[0][4]) == 4096
+    # 第 2 次：1 字节 dummy 填充，无额外 CRC
+    assert t.controls[1][4] == b"\x00"
+
+
+def test_write_area_multi_block_accumulates_crc():
+    t = FakeTransport()
+    data = b"\xBB" * 8192
+    write_area(t, 0x471, data)
+    assert len(t.controls) == 3
+    assert t.controls[0][4] == data[:4096]
+    assert t.controls[1][4] == data[4096:]
+    # 末次为覆盖全部数据的累积 CRC，2 字节大端
+    crc = crc16_ibm_3740(data)
+    assert t.controls[2][4] == bytes([(crc >> 8) & 0xFF, crc & 0xFF])
