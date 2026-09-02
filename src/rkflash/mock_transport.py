@@ -100,7 +100,7 @@ class MockRockDevice:
 
     @staticmethod
     def enumerate():
-        from .transport.windows_rockusb import DeviceInfo
+        from .transport import DeviceInfo
         return [DeviceInfo(path="mock:0", instance_id="MOCK", pid=0x330A, mode="Loader")]
 
     @staticmethod

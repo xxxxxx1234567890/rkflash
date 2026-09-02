@@ -10,6 +10,9 @@ def test_pid_from_instance_id():
 
 
 def test_infer_mode_known_pid():
-    # 常见 Loader 模式 PID（对齐 rockusb windows.rs 的 infer_mode 语义）
-    assert w.infer_mode(0x330A) in ("Loader", "Maskrom")
-    assert w.infer_mode(0x330C) in ("Loader", "Maskrom")
+    # 判别性断言，逐字对齐 rockusb windows.rs:339-348 的 infer_mode 启发式
+    assert w.infer_mode(0x330C) == "Maskrom"
+    assert w.infer_mode(0x300A) == "Maskrom"
+    assert w.infer_mode(0x330A) == "Loader"
+    assert w.infer_mode(0x350A) == "Loader"
+    assert w.infer_mode(0x320C) == "Maskrom"

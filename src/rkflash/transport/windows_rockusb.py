@@ -9,8 +9,10 @@ import ctypes.wintypes as wt
 import re
 from ctypes import wintypes
 
-setupapi = ctypes.WinDLL("setupapi")
-kernel32 = ctypes.WinDLL("kernel32")
+from . import DeviceInfo
+
+setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 
 class _GUID(ctypes.Structure):
@@ -43,18 +45,6 @@ IOCTL_MASKROM_WRITE_472 = 0x8000A004
 ROCKUSB_SERVICE = "rockusb"
 VID_RE = re.compile(r"VID_2207&PID_([0-9A-Fa-f]{4})", re.I)
 
-# 常见模式 PID 启发表（对齐 rockusb infer_mode；bcdUSB 才是权威，真机验证时校正）
-MASKROM_PIDS = {0x330C}
-LOADER_PIDS = {0x330A, 0x320A}
-
-
-class DeviceInfo:
-    def __init__(self, path, instance_id, pid, mode):
-        self.path = path
-        self.instance_id = instance_id
-        self.pid = pid
-        self.mode = mode
-
 
 def pid_from_instance_id(instance_id: str) -> int:
     m = VID_RE.search(instance_id)
@@ -64,11 +54,11 @@ def pid_from_instance_id(instance_id: str) -> int:
 
 
 def infer_mode(pid: int) -> str:
-    if pid in MASKROM_PIDS:
+    # 对齐 rockusb windows.rs:339-348：Maskrom PID 常见 0x?0c 形态；
+    # RK3568 Maskrom 枚举为 0x300a（其 Loader PID 为 0x350a）。
+    if pid & 0xF == 0xC or pid == 0x300A:
         return "Maskrom"
-    if pid in LOADER_PIDS:
-        return "Loader"
-    return "Unknown"
+    return "Loader"
 
 
 # ---- SetupAPI 结构 ----

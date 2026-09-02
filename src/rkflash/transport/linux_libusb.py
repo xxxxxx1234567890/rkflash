@@ -9,6 +9,8 @@ M2 阶段提供枚举骨架；open/bulk/control 在 Linux 真机阶段补齐
 import ctypes
 import ctypes.util
 
+from . import DeviceInfo
+
 _ROCKCHIP_VID = 0x2207
 
 
@@ -56,13 +58,6 @@ def _load():
     return lib
 
 
-class DeviceInfo:
-    def __init__(self, path, pid, mode):
-        self.path = path          # 真机阶段确定为 "bus:device"
-        self.pid = pid
-        self.mode = mode
-
-
 def list_devices():
     """枚举 VID 0x2207 的 Rockchip USB 设备（Linux 真机阶段补齐 bus/device 编号）。"""
     lib = _load()
@@ -83,7 +78,8 @@ def list_devices():
             if desc.idVendor != _ROCKCHIP_VID:
                 continue
             # TODO(真机): 用 libusb_get_bus_number/get_device_address 生成 "bus:device"
-            result.append(DeviceInfo(path=f"usb:{i}", pid=desc.idProduct, mode="Unknown"))
+            result.append(DeviceInfo(path=f"usb:{i}", instance_id="",
+                                     pid=desc.idProduct, mode="Unknown"))
         return result
     finally:
         if devs.value:

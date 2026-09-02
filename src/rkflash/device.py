@@ -1,7 +1,7 @@
 """设备发现与高层操作（跨平台分发）。"""
 import sys
 
-from .protocol.command_block import (CommandBlock, StorageIndex)
+from .protocol.command_block import SECTOR_SIZE, CommandBlock, StorageIndex
 from .protocol.operations import execute_full, write_area
 
 
@@ -30,8 +30,11 @@ class RockDevice:
         return execute_full(self.transport, CommandBlock.read_lba(start_sector, sectors))
 
     def write_lba(self, start_sector: int, data: bytes) -> None:
+        if len(data) % SECTOR_SIZE != 0:
+            raise ValueError(
+                f"write_lba data length {len(data)} is not a multiple of {SECTOR_SIZE}")
         execute_full(self.transport, CommandBlock.write_lba(
-            start_sector, len(data) // 512), data_out=data)
+            start_sector, len(data) // SECTOR_SIZE), data_out=data)
 
     def erase_lba(self, first: int, count: int) -> None:
         execute_full(self.transport, CommandBlock.erase_lba(first, count))
