@@ -34,5 +34,5 @@ def test_unpack_firmware_to_temp(tmp_path):
     result = unpack_firmware(FIXTURE, str(tmp_path))
     assert result.loader_path is not None  # MiniLoaderAll.bin / download.bin
     assert result.images, "应有可烧写分区"
-    assert result.images[0]["path"]
+    assert result.images[0].path
     assert os.path.exists(result.loader_path)

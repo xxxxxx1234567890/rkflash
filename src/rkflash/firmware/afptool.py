@@ -8,6 +8,8 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from .format import FirmwareImage
+
 RKFW_MAGIC = b"RKFW"
 RKAF_MAGIC = b"RKAF"
 
@@ -40,7 +42,7 @@ class Part:
 
 @dataclass
 class Unpacked:
-    images: list
+    images: list[FirmwareImage]
     loader_path: str | None
 
 
@@ -153,7 +155,7 @@ def unpack_firmware(path: str, out_dir: str) -> Unpacked:
     seg_off, seg_size = _rkaf_segment(path)
     os.makedirs(out_dir, exist_ok=True)
 
-    images: list[dict] = []
+    images: list[FirmwareImage] = []
     loader_path = None
     for part in enumerate_parts(path):
         rel = safe_relative_path(part.full_path)
@@ -162,8 +164,9 @@ def unpack_firmware(path: str, out_dir: str) -> Unpacked:
         if _is_loader(part.full_path):
             loader_path = str(out_path)
         if part.flash_offset != 0xFFFFFFFF:
-            images.append({"name": part.name, "path": str(out_path),
-                           "flash_offset_sectors": part.flash_offset,
-                           "flash_size_sectors": part.flash_size,
-                           "byte_count": part.byte_count})
+            images.append(FirmwareImage(
+                name=part.name, path=str(out_path),
+                flash_offset_sectors=part.flash_offset,
+                flash_size_sectors=part.flash_size,
+                byte_count=part.byte_count))
     return Unpacked(images=images, loader_path=loader_path)
