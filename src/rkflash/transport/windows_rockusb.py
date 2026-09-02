@@ -133,7 +133,8 @@ def list_devices():
     info_set = ctypes.c_void_p(SetupDiGetClassDevsW(
         ctypes.byref(guid), None, None, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE))
     if not info_set.value:
-        return []
+        # 对齐 rockusb windows.rs devices()：枚举句柄创建失败必须报错，不静默返回空
+        _raise_winerror("SetupDiGetClassDevsW")
     devices = []
     try:
         index = 0
@@ -180,30 +181,56 @@ def list_devices():
 
 
 def _raise_winerror(operation: str):
-    import ctypes as _c
-    code = _c.get_last_error()
+    code = ctypes.get_last_error()
     raise RuntimeError(f"{operation}: Win32 error {code}")
 
 
-class WindowsRockusbTransport:
-    """Rockusb 驱动句柄封装：bulk 走文件 I/O，Maskrom 写走 DeviceIoControl。"""
+def _pipe_path(interface_path: str, pipe: int) -> str:
+    # 对齐 rockusb windows.rs pipe_path："<iface>\\pipe00" / "<iface>\\pipe01"
+    return f"{interface_path}\\pipe{pipe:02d}"
 
-    def __init__(self, handle):
-        self.handle = handle
+
+def _open_handle(path: str, access: int) -> int:
+    handle = CreateFileW(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE, None,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None)
+    if handle == INVALID_HANDLE_VALUE or not handle:
+        _raise_winerror(f"CreateFileW({path})")
+    return handle
+
+
+class WindowsRockusbTransport:
+    """三句柄模型（对齐 rockusb windows.rs Transport）。
+
+    根接口路径句柄仅供 DeviceIoControl（vendor IOCTL）；官方驱动把每个
+    bulk 端点暴露为子路径：pipe00（GENERIC_READ）= bulk IN，
+    pipe01（GENERIC_WRITE）= bulk OUT。
+    """
+
+    def __init__(self, control_handle, read_handle, write_handle):
+        self.control_handle = control_handle
+        self.read_handle = read_handle
+        self.write_handle = write_handle
 
     @classmethod
     def open(cls, path: str) -> "WindowsRockusbTransport":
-        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING,
-                        FILE_ATTRIBUTE_NORMAL, None)
-        if h == INVALID_HANDLE_VALUE or not h:
-            _raise_winerror(f"CreateFileW({path})")
-        return cls(h)
+        control = _open_handle(path, GENERIC_READ | GENERIC_WRITE)
+        try:
+            read_handle = _open_handle(_pipe_path(path, 0), GENERIC_READ)
+        except RuntimeError:
+            CloseHandle(control)
+            raise
+        try:
+            write_handle = _open_handle(_pipe_path(path, 1), GENERIC_WRITE)
+        except RuntimeError:
+            CloseHandle(read_handle)
+            CloseHandle(control)
+            raise
+        return cls(control, read_handle, write_handle)
 
     def bulk_write(self, data):
         written = wt.DWORD(0)
         buf = ctypes.create_string_buffer(data, len(data))
-        if not WriteFile(self.handle, buf, len(data), ctypes.byref(written), None):
+        if not WriteFile(self.write_handle, buf, len(data), ctypes.byref(written), None):
             _raise_winerror("WriteFile")
         if written.value != len(data):
             raise RuntimeError(f"short write: {written.value}/{len(data)}")
@@ -213,7 +240,7 @@ class WindowsRockusbTransport:
         while len(out) < n:
             chunk = ctypes.create_string_buffer(n - len(out))
             read = wt.DWORD(0)
-            if not ReadFile(self.handle, chunk, n - len(out), ctypes.byref(read), None):
+            if not ReadFile(self.read_handle, chunk, n - len(out), ctypes.byref(read), None):
                 _raise_winerror("ReadFile")
             if read.value == 0:
                 raise RuntimeError(f"short read: {len(out)}/{n} bytes, device closed")
@@ -227,15 +254,19 @@ class WindowsRockusbTransport:
         ioctl = {0x471: IOCTL_MASKROM_WRITE_471, 0x472: IOCTL_MASKROM_WRITE_472}.get(index)
         if ioctl is None:
             raise RuntimeError(f"unsupported maskrom area 0x{index:04X}")
+        if not self.control_handle:
+            raise RuntimeError("control handle is not open")
         inbuf = ctypes.create_string_buffer(data, len(data))
         outbuf = ctypes.create_string_buffer(64)
         returned = wt.DWORD(0)
-        if not DeviceIoControl(self.handle, ioctl, inbuf, len(data),
+        if not DeviceIoControl(self.control_handle, ioctl, inbuf, len(data),
                                outbuf, ctypes.sizeof(outbuf), ctypes.byref(returned), None):
             _raise_winerror(f"DeviceIoControl(0x{ioctl:08X}, area 0x{index:04X})")
         return outbuf.raw[:returned.value]
 
     def close(self):
-        if self.handle:
-            CloseHandle(self.handle)
-            self.handle = None
+        for attr in ("write_handle", "read_handle", "control_handle"):
+            handle = getattr(self, attr)
+            if handle:
+                CloseHandle(handle)
+                setattr(self, attr, None)
