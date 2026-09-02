@@ -13,7 +13,8 @@ rkflash = "rkflash.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["rkflash", "rkflash.protocol", "rkflash.transport"]
+packages = ["rkflash", "rkflash.protocol", "rkflash.transport",
+             "rkflash.firmware", "rkflash.flashing"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
