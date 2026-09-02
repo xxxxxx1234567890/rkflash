@@ -27,12 +27,16 @@ if not hasattr(wt, "ULONG_PTR"):
 
 
 # ---- 常量 ----
+# 权威值：windows-sys 0.52 Usb/mod.rs —— from_u128(0xa5dcbf10_6530_11d2_901f_00c04fb951ed)
 GUID_DEVINTERFACE_USB_DEVICE = _GUID(
     0xA5DCBF10, 0x6530, 0x11D2,
-    (ctypes.c_ubyte * 8)(0xAC, 0x2F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+    (ctypes.c_ubyte * 8)(0x90, 0x1F, 0x00, 0xC0, 0x4F, 0xB9, 0x51, 0xED))
+# x64 下 SDK 的 SP_DEVICE_INTERFACE_DETAIL_DATA_W 含对齐填充，cbSize 必须为 8；
+# ctypes 对 4+1*WCHAR 的自然布局算出 6，会被 SetupDi 拒绝
+DETAIL_DATA_CBSIZE = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 6
 DIGCF_PRESENT = 0x2
 DIGCF_DEVICEINTERFACE = 0x10
-SPDRP_SERVICE = 0x11
+SPDRP_SERVICE = 0x4  # 权威值：regstr.h / windows-sys（0x11 是无效属性号，查询必败）
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
 OPEN_EXISTING = 3
@@ -152,13 +156,18 @@ def list_devices():
                                              None, 0, ctypes.byref(needed), None)
             buf = ctypes.create_string_buffer(needed.value)
             detail = ctypes.cast(buf, ctypes.POINTER(_SP_DEVICE_INTERFACE_DETAIL_DATA))
-            # cbSize 按微软要求填结构体大小；若真机枚举失败，尝试 4（仅 DWORD）
-            detail.contents.cbSize = ctypes.sizeof(_SP_DEVICE_INTERFACE_DETAIL_DATA)
+            # cbSize：x64 下必须为 8（SDK 结构含对齐填充），见 DETAIL_DATA_CBSIZE 注释
+            detail.contents.cbSize = DETAIL_DATA_CBSIZE
             if not SetupDiGetDeviceInterfaceDetailW(info_set, ctypes.byref(iface),
                                                     detail, needed.value, None,
                                                     ctypes.byref(dev_info)):
                 continue
-            path = ctypes.wstring_at(ctypes.addressof(detail.contents.DevicePath))
+            # 实测（x64 Win11）：cbSize 须传 8（SetupAPI 校验要求），但 DevicePath
+            # 写在自然布局偏移 4（回读缓冲区首字节 \x08 + "\\\x00\\..."证实）。
+            # c_wchar 数组字段访问会被 ctypes 转成 str，无法 addressof，故按偏移直读
+            path = ctypes.wstring_at(
+                ctypes.addressof(detail.contents)
+                + _SP_DEVICE_INTERFACE_DETAIL_DATA.DevicePath.offset)
             inst_buf = ctypes.create_unicode_buffer(256)
             SetupDiGetDeviceInstanceIdW(info_set, ctypes.byref(dev_info), inst_buf,
                                         ctypes.sizeof(inst_buf), None)
@@ -166,10 +175,11 @@ def list_devices():
             if "VID_2207" not in instance_id:
                 continue
             svc_buf = ctypes.create_unicode_buffer(256)
-            SetupDiGetDeviceRegistryPropertyW(
-                info_set, ctypes.byref(dev_info), SPDRP_SERVICE, None,
-                ctypes.cast(svc_buf, ctypes.POINTER(ctypes.c_byte)),
-                ctypes.sizeof(svc_buf), None)
+            if not SetupDiGetDeviceRegistryPropertyW(
+                    info_set, ctypes.byref(dev_info), SPDRP_SERVICE, None,
+                    ctypes.cast(svc_buf, ctypes.POINTER(ctypes.c_byte)),
+                    ctypes.sizeof(svc_buf), None):
+                continue  # 无服务属性（如未绑定驱动）——不是可用的 Rockusb 设备
             if svc_buf.value.lower() != ROCKUSB_SERVICE:
                 continue
             devices.append(DeviceInfo(path, instance_id,

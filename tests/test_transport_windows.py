@@ -109,3 +109,24 @@ def test_close_closes_all_three_handles(monkeypatch):
     assert sorted(closed) == [1, 2, 3]
     assert (t.control_handle, t.read_handle, t.write_handle) == (None, None, None)
     t.close()  # 幂等
+
+
+def test_guid_matches_windows_sys_authority():
+    # 权威值：windows-sys 0.52 Usb/mod.rs from_u128(0xa5dcbf10_6530_11d2_901f_00c04fb951ed)
+    # 真机教训：GUID 值曾写错（Data4=AC2F...）导致枚举恒空
+    assert w.GUID_DEVINTERFACE_USB_DEVICE.Data1 == 0xA5DCBF10
+    assert w.GUID_DEVINTERFACE_USB_DEVICE.Data2 == 0x6530
+    assert w.GUID_DEVINTERFACE_USB_DEVICE.Data3 == 0x11D2
+    assert bytes(w.GUID_DEVINTERFACE_USB_DEVICE.Data4) == \
+        bytes([0x90, 0x1F, 0x00, 0xC0, 0x4F, 0xB9, 0x51, 0xED])
+
+
+def test_spdrp_service_matches_windows_sys_authority():
+    # 真机教训：SPDRP_SERVICE 曾误写 0x11（无效属性号），查询必败致设备全被过滤
+    assert w.SPDRP_SERVICE == 0x4
+
+
+def test_detail_path_read_at_field_offset_not_cbsize():
+    # 真机实测（x64 Win11）：cbSize 传 8（SetupAPI 校验），但 DevicePath 在偏移 4
+    assert w._SP_DEVICE_INTERFACE_DETAIL_DATA.DevicePath.offset == 4
+    assert w.DETAIL_DATA_CBSIZE == 8
