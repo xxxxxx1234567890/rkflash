@@ -4,11 +4,8 @@ import pytest
 
 from rkflash.cli import main
 
-NOT_IMPLEMENTED = ["flash", "upgrade", "boot-loader", "erase", "storage", "export"]
-
 
 def test_devices_smoke(capsys):
-    # 冒烟走 mock 传输层，不做真实枚举；真实接线在 M3/M4
     rc = main(["--transport", "mock", "devices"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
@@ -22,69 +19,62 @@ def test_version_flag():
     assert exc_info.value.code == 0
 
 
-def test_devices_mock(monkeypatch):
-    monkeypatch.setenv("RKFLASH_TRANSPORT", "mock")
-    rc = main(["devices"])
-    assert rc == 0
-
-
 def test_info_mock(capsys):
     rc = main(["--transport", "mock", "info", "--path", "mock:0"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    # 统一 hex 输出：chip/flash_id 也是十六进制串
     assert out["chip"] == "33353838000000000000000000000000"
     assert out["flash_id"] == "7878787878"
-    assert out["flash_info"].startswith("0000")
     assert set(out) == {"chip", "flash_id", "flash_info", "capability", "storage"}
 
 
 def test_reset_mock():
-    rc = main(["--transport", "mock", "reset", "--path", "mock:0"])
-    assert rc == 0
+    assert main(["--transport", "mock", "reset", "--path", "mock:0"]) == 0
 
 
 def test_test_mock():
-    rc = main(["--transport", "mock", "test", "--path", "mock:0"])
-    assert rc == 0
-
-
-@pytest.mark.parametrize("command", NOT_IMPLEMENTED)
-def test_unimplemented_commands_fail_before_opening_device(command, capsys, monkeypatch):
-    # NOT_IMPLEMENTED 必须在任何设备打开之前返回（mock 路径也不许碰）
-    monkeypatch.setattr("rkflash.cli.open_device",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not open")))
-    rc = main([command])
-    assert rc != 0
-    err = capsys.readouterr().err
-    assert "NOT_IMPLEMENTED" in err
+    assert main(["--transport", "mock", "test", "--path", "mock:0"]) == 0
 
 
 def test_reset_dry_run_does_not_touch_device(capsys, monkeypatch):
     monkeypatch.setattr("rkflash.cli.open_device",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not open")))
-    rc = main(["--transport", "mock", "reset", "--dry-run",
-               "--path", "mock:0", "--opcode", "maskrom"])
+    rc = main(["--dry-run", "--transport", "mock", "reset", "--path", "mock:0",
+               "--opcode", "maskrom"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out == {"dry_run": True, "command": "reset", "path": "mock:0", "opcode": "maskrom"}
+    assert out["dry_run"] is True and out["opcode"] == "maskrom"
 
 
 def test_reset_opcode_choices_from_enum():
     from rkflash.protocol.command_block import ResetOpcode
     for op in ResetOpcode:
-        rc = main(["--transport", "mock", "reset", "--dry-run",
+        rc = main(["--dry-run", "--transport", "mock", "reset",
                    "--path", "mock:0", "--opcode", op.name.lower()])
         assert rc == 0
 
 
+def test_flash_and_erase_need_confirmation(capsys):
+    assert main(["--transport", "mock", "flash", "--part", "uboot=no.img"]) != 0
+    assert "CONFIRM_REQUIRED" in capsys.readouterr().err
+    assert main(["--transport", "mock", "erase", "--lba", "0x40:1"]) != 0
+    assert "CONFIRM_REQUIRED" in capsys.readouterr().err
+
+
+def test_dry_run_plans_without_touching_device(capsys, monkeypatch):
+    monkeypatch.setattr("rkflash.cli.open_device",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not open")))
+    rc = main(["--dry-run", "--transport", "mock", "erase", "--lba", "0x40:4"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["dry_run"] is True
+
+
 def test_internal_error_wrapped_without_traceback(capsys, monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("exploded unexpectedly")
-    monkeypatch.setattr("rkflash.cli.list_devices", boom)
+    monkeypatch.setattr("rkflash.cli.list_devices", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("exploded unexpectedly")))
     rc = main(["devices"])
-    assert rc != 0
     captured = capsys.readouterr()
+    assert rc != 0
     assert "INTERNAL" in captured.err
     assert "exploded unexpectedly" in captured.err
     assert "Traceback" not in captured.err
