@@ -97,3 +97,12 @@ class MockRockDevice:
 
     def write_area(self, area: int, data: bytes) -> None:
         write_area(self.transport, area, data)
+
+    @staticmethod
+    def enumerate():
+        from .transport.windows_rockusb import DeviceInfo
+        return [DeviceInfo(path="mock:0", instance_id="MOCK", pid=0x330A, mode="Loader")]
+
+    @staticmethod
+    def open(path: str) -> "MockRockDevice":
+        return MockRockDevice()
