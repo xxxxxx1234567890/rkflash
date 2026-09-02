@@ -98,6 +98,9 @@ class MockRockDevice:
     def write_area(self, area: int, data: bytes) -> None:
         write_area(self.transport, area, data)
 
+    def close(self) -> None:
+        """mock 无需释放资源；保持与真实设备一致的接口。"""
+
     @staticmethod
     def enumerate():
         from .transport import DeviceInfo
