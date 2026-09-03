@@ -182,7 +182,7 @@ def _cmd(dev: RockDevice, args) -> int:
             raise RkFlashError("CONFIRM_REQUIRED",
                                "upgrade 会覆盖整机，需 --yes 确认", "加 --yes 确认执行")
         from .flashing.upgrade import run_upgrade_images
-        from .flashing.afptool import unpack_firmware
+        from .firmware.afptool import unpack_firmware
         import tempfile
         tmp = tempfile.mkdtemp(prefix="rkflash-upgrade-")
         try:
