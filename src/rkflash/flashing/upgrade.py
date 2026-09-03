@@ -53,8 +53,15 @@ def _write_parameter(dev, param_path: str, lba: int) -> None:
     dev.write_lba(lba, padded)
 
 
+def _is_nand(dev) -> bool:
+    """flash_info 块大小扇区>1 → NAND 类（需要擦除粒度，官方亦写 GPT）。"""
+    from .loader import _nand_block_sectors
+    return _nand_block_sectors(dev) > 1
+
+
 def run_upgrade_images(dev, images, loader_path, no_reset=False) -> str:
     flash_sectors = _flash_sectors(dev)
+    nand = _is_nand(dev)
     lines = []
     if loader_path:
         lines.append(write_loader_idblock(dev, loader_path, flash_sectors))
@@ -64,22 +71,20 @@ def run_upgrade_images(dev, images, loader_path, no_reset=False) -> str:
         kind = _parameter_kind(img)
         if kind is None:
             continue
-        # 先处理 GPT parameter：建表写 primary/backup + parameter@0x2000
-        if kind == "gpt" and not gpt_written:
-            parts = parse_partitions(open(img.path, "rb").read())
-            if not parts:
-                raise ValueError(f"GPT parameter has no partitions: {img.path}")
+        parts = parse_partitions(open(img.path, "rb").read())
+        # NAND 板或 TYPE:GPT 参数 → 建 GPT（官方 NAND 布局即 GPT，实测验证）。
+        # 分区信息已编码进 GPT 条目，不再单独落 PARM 块（避免与 uboot@0x2000 冲突）。
+        if parts and (kind == "gpt" or nand) and not gpt_written:
             tables = build_gpt_tables(parts, flash_sectors)
             for i in range(0, len(tables.primary), SECTOR_SIZE):
                 dev.write_lba(i // SECTOR_SIZE,
                               tables.primary[i:i + SECTOR_SIZE])
-            _write_parameter(dev, img.path, FIRMWARE_PARAMETER_START_SECTOR)
             for i in range(0, len(tables.backup), SECTOR_SIZE):
                 dev.write_lba(tables.backup_start_sector + i // SECTOR_SIZE,
                               tables.backup[i:i + SECTOR_SIZE])
             gpt_written = True
-        elif kind == "legacy":
-            # 非 GPT parameter：同样重映射到固定 0x2000（上游 firmware_write_target）
+        else:
+            # legacy 无 GPT：parameter 重映射固定 0x2000（上游 firmware_write_target）
             _write_parameter(dev, img.path, FIRMWARE_PARAMETER_START_SECTOR)
         lines.append(f"written parameter to LBA 0x{FIRMWARE_PARAMETER_START_SECTOR:x}")
 

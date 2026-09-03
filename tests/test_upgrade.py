@@ -46,11 +46,10 @@ def test_upgrade_gpt_parameter_creates_tables(tmp_path):
                         flash_size_sectors=8, byte_count=len(gpt_param_text))
     log = run_upgrade_images(dev, [img], loader_path=None, no_reset=True)
     assert "succeeded" in log
-    # primary GPT 头在 LBA1（EFI PART）
+    # primary GPT 头在 LBA1（EFI PART）；分区信息入 GPT 条目，不再单独落 PARM 块
     assert dev.read_lba(1, 1)[:8] == b"EFI PART"
-    # PARM 块（含头）落 0x2000
     raw = dev.read_lba(0x2000, 1)
-    assert raw.startswith(b"PARM")
+    assert not raw.startswith(b"PARM")
 
 
 def test_upgrade_legacy_parameter_remapped_to_0x2000(tmp_path):

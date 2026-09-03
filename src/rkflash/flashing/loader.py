@@ -77,8 +77,20 @@ def wait_for_loader(dev) -> bool:
     return False
 
 
+def _nand_block_sectors(dev) -> int:
+    """flash_info 的块大小（扇区）。NAND 为 256(128KB) 等 >1；eMMC 常为 1/8。"""
+    data = dev.flash_info()
+    if len(data) >= 6:
+        return int.from_bytes(data[4:6], "little")
+    return 0
+
+
 def write_loader_idblock(dev, loader_path: str, flash_sectors: int) -> str:
-    """在 Loader 模式下把构造的 IDBlock 写到 LBA 0x40。"""
+    """在 Loader 模式下把构造的 IDBlock 写到 LBA 0x40。
+
+    NAND（块大小 >1）保留区必须**先按块擦除再写**——实测真机未擦除的 loader
+    区 write_lba 是 no-op（读回 0xFF），擦除后写入正常落盘。
+    """
     with open(loader_path, "rb") as f:
         loader = f.read()
     cap = dev.capability()
@@ -86,6 +98,13 @@ def write_loader_idblock(dev, loader_path: str, flash_sectors: int) -> str:
     sectors = len(idblock) // 512
     if IDBLOCK_START_SECTOR + sectors > flash_sectors:
         raise ValueError("Loader IDBlock exceeds the target flash size")
+
+    block = _nand_block_sectors(dev)
+    if block > 1:
+        end = IDBLOCK_START_SECTOR + sectors
+        first_block = (IDBLOCK_START_SECTOR // block) * block
+        last_end = ((end + block - 1) // block) * block
+        dev.erase_lba(first_block, last_end - first_block)
 
     total = len(idblock)
     written = 0
