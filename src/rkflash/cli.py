@@ -90,9 +90,33 @@ def _resolve(transport: str, path: str | None) -> RockDevice:
 def _lba_pair(spec: str) -> tuple[int, int]:
     try:
         start, count = spec.split(":", 1)
-        return int(start, 0), int(count, 0)
+        start, count = int(start, 0), int(count, 0)
+        if count <= 0:
+            raise ValueError("count must be positive")
+        return start, count
     except ValueError as e:
-        raise RkFlashError("BAD_ARGS", f"invalid --lba '{spec}' (need START:COUNT)", "") from e
+        raise RkFlashError("BAD_ARGS",
+                           f"invalid --lba '{spec}' (need START:COUNT, count>0)", "") from e
+
+
+def _wait_loader_device(transport: str, tries: int = 60) -> RockDevice:
+    """Maskrom 下载 Loader 后设备会重枚举为 Loader：轮询重开直到 TestUnitReady 通过。"""
+    import time
+    for _ in range(tries):
+        for d in list_devices(transport):
+            try:
+                dev = open_device(d.path, transport)
+                dev.test_unit_ready()
+                return dev
+            except Exception:  # noqa: BLE001
+                try:
+                    dev.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        time.sleep(0.25)
+    raise RkFlashError("DEVICE_LOST",
+                       "loader did not reappear after Maskrom boot",
+                       "确认板子已进入 Loader 模式后重试 `rkflash devices`")
 
 
 def _cmd(dev: RockDevice, args) -> int:
@@ -126,10 +150,6 @@ def _cmd(dev: RockDevice, args) -> int:
                                "flash 会覆盖设备分区，需 --yes 确认", "加 --yes 确认执行")
         from .flashing.download import run_download
         from .flashing.lba import read_device_partitions
-        if args.loader:
-            from .flashing.loader import download_boot
-            log = download_boot(dev, args.loader)
-            emit_progress(log)
         targets = []
         for item in args.part:
             name, _, path = item.partition("=")
@@ -139,12 +159,24 @@ def _cmd(dev: RockDevice, args) -> int:
         if args.dry_run:
             emit_json({"dry_run": True, "command": "flash", "parts": targets})
             return 0
-        parts = {p.name.lower(): p for p in read_device_partitions(dev)}
-        from .flashing.device_ops import flash_sectors
-        fs = flash_sectors(dev)
-        emit_progress(run_download(dev, parts, targets, fs))
-        emit_json({"flashed": [t[0] for t in targets]})
-        return 0
+        worker = dev
+        try:
+            if args.loader:
+                # Maskrom：先载入 Loader，设备会重枚举——必须关旧句柄、等新 Loader 重开
+                from .flashing.loader import download_boot
+                emit_progress(download_boot(dev, args.loader))
+                dev.close()
+                worker = _wait_loader_device(
+                    args.transport if args.transport != "auto" else _transport())
+            parts = {p.name.lower(): p for p in read_device_partitions(worker)}
+            from .flashing.device_ops import flash_sectors
+            fs = flash_sectors(worker)
+            emit_progress(run_download(worker, parts, targets, fs))
+            emit_json({"flashed": [t[0] for t in targets]})
+            return 0
+        finally:
+            if worker is not dev:
+                worker.close()
     if args.command == "upgrade":
         if not (args.dry_run or args.yes):
             raise RkFlashError("CONFIRM_REQUIRED",
@@ -153,12 +185,8 @@ def _cmd(dev: RockDevice, args) -> int:
         from .flashing.afptool import unpack_firmware
         import tempfile
         tmp = tempfile.mkdtemp(prefix="rkflash-upgrade-")
-        unpacked = unpack_firmware(args.update_img, tmp)
-        if args.dry_run:
-            emit_json({"dry_run": True, "command": "upgrade",
-                       "images": [i.name for i in unpacked.images]})
-            return 0
         try:
+            unpacked = unpack_firmware(args.update_img, tmp)
             log = run_upgrade_images(dev, unpacked.images, unpacked.loader_path,
                                      no_reset=args.no_reset)
         finally:

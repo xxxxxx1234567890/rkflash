@@ -84,3 +84,45 @@ def test_short_write_padding(tmp_path):
     write_firmware_image(dev, img, flash_sectors=0x1000)
     data = dev.transport.storage.get(5)
     assert data == b"\xAB" * 500 + b"\x00" * 12
+
+
+def _sparse_bytes(block_size=512, fhs=28):
+    out = bytearray()
+    out += struct.pack("<I", 0xED26FF3A) + struct.pack("<H", 1) + struct.pack("<H", 0)
+    out += struct.pack("<H", fhs) + struct.pack("<H", 12)
+    out += struct.pack("<I", block_size)
+    out += struct.pack("<I", 2)            # 2 逻辑块
+    out += struct.pack("<I", 2)            # 2 chunk: raw + dontcare
+    out += struct.pack("<I", 0)
+    # chunk raw(1 block)
+    out += struct.pack("<H", 0xCAC1) + struct.pack("<H", 0)
+    out += struct.pack("<I", 1) + struct.pack("<I", 12 + block_size)
+    out += b"\x11" * block_size
+    # chunk dontcare(1 block)
+    out += struct.pack("<H", 0xCAC3) + struct.pack("<H", 0)
+    out += struct.pack("<I", 1) + struct.pack("<I", 12)
+    if fhs > 28:                            # 扩展文件头：fhs 处才开始 chunk
+        data = bytes(out)
+        out = bytearray(data[:28]) + b"\x00" * (fhs - 28) + data[28:]
+    return bytes(out)
+
+
+def test_run_download_sparse_partition(tmp_path):
+    dev = _mock_dev()
+    p = tmp_path / "system_sparse.img"
+    p.write_bytes(_sparse_bytes())
+    parts = {"system": DownloadPartition("system", 0x800, 16)}
+    run_download(dev, parts, [("system", str(p))], flash_sectors=0x800000)
+    # 逻辑写：0x800=raw、0x801 是 dontcare 跳过
+    assert dev.transport.storage.get(0x800) == b"\x11" * 512
+    assert dev.transport.storage.get(0x801) is None
+
+
+def test_sparse_extended_file_header_skipped(tmp_path):
+    dev = _mock_dev()
+    p = tmp_path / "ext.img"
+    p.write_bytes(_sparse_bytes(fhs=56))
+    img = FirmwareImage(name="x", path=str(p), flash_offset_sectors=0x40,
+                        flash_size_sectors=16, byte_count=0)
+    write_firmware_image(dev, img, flash_sectors=0x800000)
+    assert dev.transport.storage.get(0x40) == b"\x11" * 512

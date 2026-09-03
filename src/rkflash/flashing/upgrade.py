@@ -28,32 +28,20 @@ def _flash_sectors(dev) -> int:
     return sectors
 
 
-def _write_gpt_if_needed(dev, images, flash_sectors: int) -> bool:
-    """images 中若有 TYPE:GPT 的 parameter 文件则建表写 GPT + parameter@0x2000。"""
-    gpt_param = None
-    for img in images:
-        try:
-            with open(img.path, "rb") as f:
-                head = f.read(4096)
-        except OSError:
-            continue
-        if head.startswith(b"PARM") and b"TYPE: GPT" in head:
-            gpt_param = img
-            break
-    if gpt_param is None:
-        return False
-    parts = parse_partitions(open(gpt_param.path, "rb").read())
-    if not parts:
-        return False
-    tables = build_gpt_tables(parts, flash_sectors)
-    # primary 自 LBA0；parameter(PARM payload)固定落 0x2000；backup 落尾部
-    for i in range(0, len(tables.primary), SECTOR_SIZE):
-        dev.write_lba(i // SECTOR_SIZE, tables.primary[i:i + SECTOR_SIZE])
-    _write_parameter(dev, gpt_param.path, FIRMWARE_PARAMETER_START_SECTOR)
-    for i in range(0, len(tables.backup), SECTOR_SIZE):
-        dev.write_lba(tables.backup_start_sector + i // SECTOR_SIZE,
-                      tables.backup[i:i + SECTOR_SIZE])
-    return True
+def _parameter_kind(img) -> str | None:
+    """读 parameter 镜像首段：返回 'gpt' / 'legacy' / None(非 parameter)。
+
+    对齐上游 firmware_write_target 语义：parameter 镜像（内容以 PARM 起始）
+    无条件写往固定 0x2000，绝不按其声明的 flash_offset（legacy 常为 0）落盘。
+    """
+    try:
+        with open(img.path, "rb") as f:
+            head = f.read(4096)
+    except OSError:
+        return None
+    if not head.startswith(b"PARM"):
+        return None
+    return "gpt" if b"TYPE: GPT" in head else "legacy"
 
 
 def _write_parameter(dev, param_path: str, lba: int) -> None:
@@ -70,27 +58,41 @@ def run_upgrade_images(dev, images, loader_path, no_reset=False) -> str:
     lines = []
     if loader_path:
         lines.append(write_loader_idblock(dev, loader_path, flash_sectors))
-    wrote_gpt = _write_gpt_if_needed(dev, images, flash_sectors)
+
+    gpt_written = False
     for img in images:
-        # GPT 分支已处理 parameter；普通 parameter/其余正常烧
-        from .download import write_firmware_image
-        if wrote_gpt and _is_gpt_param(img):
+        kind = _parameter_kind(img)
+        if kind is None:
             continue
+        # 先处理 GPT parameter：建表写 primary/backup + parameter@0x2000
+        if kind == "gpt" and not gpt_written:
+            parts = parse_partitions(open(img.path, "rb").read())
+            if not parts:
+                raise ValueError(f"GPT parameter has no partitions: {img.path}")
+            tables = build_gpt_tables(parts, flash_sectors)
+            for i in range(0, len(tables.primary), SECTOR_SIZE):
+                dev.write_lba(i // SECTOR_SIZE,
+                              tables.primary[i:i + SECTOR_SIZE])
+            _write_parameter(dev, img.path, FIRMWARE_PARAMETER_START_SECTOR)
+            for i in range(0, len(tables.backup), SECTOR_SIZE):
+                dev.write_lba(tables.backup_start_sector + i // SECTOR_SIZE,
+                              tables.backup[i:i + SECTOR_SIZE])
+            gpt_written = True
+        elif kind == "legacy":
+            # 非 GPT parameter：同样重映射到固定 0x2000（上游 firmware_write_target）
+            _write_parameter(dev, img.path, FIRMWARE_PARAMETER_START_SECTOR)
+        lines.append(f"written parameter to LBA 0x{FIRMWARE_PARAMETER_START_SECTOR:x}")
+
+    for img in images:
+        if _parameter_kind(img) is not None:
+            continue  # parameter 已在上面统一处理
+        from .download import write_firmware_image
         lines.append(write_firmware_image(dev, img, flash_sectors))
     if not no_reset:
         dev.reset()
         lines.append("Reset Device Success")
     lines.append("Firmware upgrade succeeded")
     return "\n".join(lines)
-
-
-def _is_gpt_param(img) -> bool:
-    try:
-        with open(img.path, "rb") as f:
-            head = f.read(64)
-    except OSError:
-        return False
-    return head.startswith(b"PARM") and b"TYPE: GPT" in head
 
 
 def run_upgrade(dev_factory, update_img: str, no_reset=False, is_maskrom=False,

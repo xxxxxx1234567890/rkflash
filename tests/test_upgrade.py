@@ -51,3 +51,18 @@ def test_upgrade_gpt_parameter_creates_tables(tmp_path):
     # PARM 块（含头）落 0x2000
     raw = dev.read_lba(0x2000, 1)
     assert raw.startswith(b"PARM")
+
+
+def test_upgrade_legacy_parameter_remapped_to_0x2000(tmp_path):
+    """非 GPT(legacy) parameter：flash_offset 常为 0，必须重映射到 0x2000 而非 LBA0。"""
+    dev = _dev()
+    legacy = (b"PARM\x00CMDLINE:mtdparts=rk29xxnand:"
+              b"0x00002000@0x00002000(uboot),-@0x00020800(rootfs)\x00")
+    p = tmp_path / "parameter.txt"
+    p.write_bytes(legacy)
+    img = FirmwareImage(name="parameter", path=str(p), flash_offset_sectors=0,
+                        flash_size_sectors=8, byte_count=len(legacy))
+    run_upgrade_images(dev, [img], loader_path=None, no_reset=True)
+    # LBA0 不应被写（保护 MBR 区）；parameter 落在 0x2000
+    assert dev.read_lba(0x2000, 1).startswith(b"PARM")
+    assert dev.transport.storage.get(0) is None

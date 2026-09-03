@@ -108,6 +108,7 @@ def enumerate_parts(path: str) -> list[Part]:
         po, bc = u[_I_PART_OFFSET], u[_I_BYTE_COUNT]
         if not full_path or not (0 < bc <= seg_size) or not (0 <= po < seg_size):
             break
+        # 对齐 extract.rs：SELF/RESERVED 与不可烧条目保留元数据，但不解出/不烧
         parts.append(Part(name=name, full_path=full_path,
                           flash_size=u[_I_FLASH_SIZE], flash_offset=u[_I_FLASH_OFFSET],
                           part_offset=po, byte_count=bc))
@@ -115,14 +116,22 @@ def enumerate_parts(path: str) -> list[Part]:
     return parts
 
 
+# full_path 语义：SELF = 本文件自身引用、RESERVED = 保留区（extract.rs 跳过）
+_SKIP_PATHS = {"SELF", "RESERVED"}
+
+
 def safe_relative_path(full_path: str) -> str:
-    """规范化条目路径并拒绝逃逸（对齐 extract.rs safe_relative_path）。"""
+    """规范化条目路径并拒绝逃逸（对齐 extract.rs safe_relative_path）。
+
+    Rust 逐 Component 过滤，仅把 ParentDir/RootDir/Prefix 判非法；以点开头的
+    普通文件名（如 .boot）是合法的 Normal 组件。
+    """
     normalized = full_path.replace("\\", "/")
     out: list[str] = []
     for comp in normalized.split("/"):
         if comp in ("", "."):
             continue
-        if comp == ".." or ":" in comp or comp.startswith(".") and comp not in (".",):
+        if comp == ".." or ":" in comp:
             raise FirmwareError(f"unsafe firmware entry path: {full_path}")
         out.append(comp)
     if not out:
@@ -158,8 +167,12 @@ def unpack_firmware(path: str, out_dir: str) -> Unpacked:
     images: list[FirmwareImage] = []
     loader_path = None
     for part in enumerate_parts(path):
+        if part.full_path in _SKIP_PATHS:      # SELF/RESERVED 跳过（对齐 extract.rs）
+            continue
         rel = safe_relative_path(part.full_path)
         out_path = Path(out_dir) / rel
+        if out_path.parent != Path(out_dir):
+            os.makedirs(out_path.parent, exist_ok=True)
         _extract(path, seg_off, part.part_offset, part.byte_count, out_path)
         if _is_loader(part.full_path):
             loader_path = str(out_path)

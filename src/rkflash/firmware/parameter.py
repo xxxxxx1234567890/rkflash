@@ -136,7 +136,10 @@ def _parse_guid(value: str) -> bytes:
 
 
 def _hex(value: str) -> int:
-    return int(value.lstrip("0x"), 16)
+    v = value.lower()
+    if v.startswith("0x"):
+        v = v[2:]
+    return int(v, 16)
 
 
 def _crc32(data: bytes) -> int:

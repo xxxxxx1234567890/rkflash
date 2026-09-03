@@ -88,3 +88,13 @@ def test_real_loader_header_and_entries():
     for name in ("FlashBoot", "FlashData"):
         blob_data = entry_data(blob, header.entry_loader, name)
         assert blob_data is not None and len(blob_data) > 0
+
+
+def test_entry_data_rejects_truncated_blob():
+    # 条目声明 data 超出 loader 文件 → 必须报错而非静默半截/空
+    blob = bytearray(4096)
+    blob[0:102] = make_header(entries_offset=1024, loader_count=1)
+    blob[1024:1024 + 57] = make_entry("FlashBoot", 4096, 512)  # 4096+512 > 4096
+    with pytest.raises(ValueError):
+        entry_data(bytes(blob), parse_boot_header(bytes(blob[:102])).entry_loader,
+                   "FlashBoot")

@@ -24,13 +24,18 @@ def erase_range(dev, first: int, count: int) -> None:
 
 
 def export_image(dev, first: int, count: int, out_path: str) -> str:
-    """按 128 扇区块读出写文件。"""
+    """按 128 扇区块读出写文件；短读报错。"""
+    if count <= 0:
+        raise ValueError("export sector count must be positive")
     written = 0
     remaining = count
     with open(out_path, "wb") as f:
         while remaining > 0:
             n = min(remaining, READ_LBA_CHUNK)
             data = dev.read_lba(first + written, n)
+            if len(data) != n * SECTOR_SIZE:
+                raise IOError(f"short LBA read at {first + written}: "
+                              f"{len(data)} bytes, expected {n * SECTOR_SIZE}")
             f.write(data)
             written += n
             remaining -= n

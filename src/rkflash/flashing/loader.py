@@ -36,7 +36,12 @@ def upload_maskrom_boot(dev, loader: bytes, area: int, entries) -> None:
             break
         from ..firmware.bootfile import parse_boot_entry
         entry = parse_boot_entry(rec)
-        data = loader[entry.data_offset:entry.data_offset + entry.data_size]
+        start = entry.data_offset
+        end = start + entry.data_size
+        if end > len(loader):
+            raise ValueError(f"boot entry blob is truncated "
+                             f"(0x{start:x}+0x{entry.data_size:x} > {len(loader)})")
+        data = loader[start:end]
         dev.write_area(area, data)
         _sleep(entry.data_delay / 1000.0)
 

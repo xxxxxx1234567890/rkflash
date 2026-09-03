@@ -95,13 +95,17 @@ def entry_data(loader: bytes, entries: RkBootHeaderEntry, name: str) -> bytes | 
         raise ValueError("loader entry table smaller than a boot entry")
     for index in range(entries.count):
         entry_offset = entries.offset + entries.size * index
+        if entry_offset + ENTRY_BYTES > len(loader):
+            raise ValueError(f"loader entry table is truncated (entry {index})")
         chunk = loader[entry_offset:entry_offset + ENTRY_BYTES]
-        if len(chunk) < ENTRY_BYTES:
-            break
         entry = parse_boot_entry(chunk)
         if not entry.name.casefold() == name.casefold():
             continue
         start = entry.data_offset
         end = start + entry.data_size
+        if end > len(loader):
+            raise ValueError(f"loader entry {name} is truncated "
+                             f"(offset 0x{start:x}, {entry.data_size} bytes, "
+                             f"file {len(loader)})")
         return loader[start:end]
     return None

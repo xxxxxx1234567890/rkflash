@@ -39,3 +39,8 @@ def test_flash_dry_run_no_device(capsys):
 def test_flash_requires_confirm_without_yes(capsys):
     assert _run(["flash", "--part", "uboot=no.img"]) != 0
     assert "CONFIRM_REQUIRED" in capsys.readouterr().err
+
+
+def test_lba_count_must_be_positive(capsys):
+    assert _run(["erase", "--lba", "0x40:0", "--yes"]) != 0
+    assert "BAD_ARGS" in capsys.readouterr().err
