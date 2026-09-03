@@ -9,11 +9,17 @@ description: 通过纯 Python rkflash 引擎对 Rockchip SoC 进行 USB 烧写�
 
 ## 运行环境
 
+<!-- RKFLASH-INSTALL-ANCHOR:START -->
+在仓库内运行时：
+
 ```bash
-cd <本项目目录>/rockchip-flash-skill
+cd <本仓库目录>
 export PYTHONPATH=src            # Windows 用 `py -3` 而非 `python`
 alias rkflash='py -3 -m rkflash' # (PowerShell: Set-Alias)
 ```
+
+> 作为全局技能安装时，`scripts/install_skill.py` 会把本段替换为指向你机器上仓库绝对路径的运行指引。
+<!-- RKFLASH-INSTALL-ANCHOR:END -->
 
 命令统一约定：**结果 = stdout JSON；进度/日志 = stderr；退出码 0/非 0**。先 `rkflash devices` 拿 `path`，涉及具体设备都用 `--path`。
 
@@ -62,6 +68,8 @@ alias rkflash='py -3 -m rkflash' # (PowerShell: Set-Alias)
 - **Maskrom 写超时(error 121)**：设备实际不在 Maskrom（Loader 在跑）——确认该板正确的 Maskrom 进法。
 - **mode 显示不准**：PID 启发式对新型号可能误判，以实际操作结果为准。
 
-## 边界（暂不支持）
+## 已知边界（务必如实告知用户）
+- **NAND（SPI-NAND）整包升级端到端未验证**：分区写入正确、Maskrom 引导 Loader 已验证；但 NAND 的 Loader IDB 组合写入仍待对照官方 on-flash 布局收尾（见 `docs/rk3506-nand-findings.md`）。写 flash 前明确提示该风险，建议用户备份/可用官方工具恢复。
+- **Loader IDBlock 落 LBA 0x40 是 eMMC 语义**；NAND 的 Loader 存放位置/机制不同（保留区，需擦除先行且组合流程待验证）。
 - macOS 传输层未实现（代码仅 Windows/Linux）。
 - upgrade_tool 兼容命令（分区表 PL/序列号 SN 等）不在本引擎范围。
