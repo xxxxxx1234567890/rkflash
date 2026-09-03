@@ -266,13 +266,17 @@ class WindowsRockusbTransport:
             raise RuntimeError(f"unsupported maskrom area 0x{index:04X}")
         if not self.control_handle:
             raise RuntimeError("control handle is not open")
-        inbuf = ctypes.create_string_buffer(data, len(data))
-        outbuf = ctypes.create_string_buffer(64)
-        returned = wt.DWORD(0)
-        if not DeviceIoControl(self.control_handle, ioctl, inbuf, len(data),
-                               outbuf, ctypes.sizeof(outbuf), ctypes.byref(returned), None):
+        # 对齐上游 rockusb write_maskrom：这是 buffered IOCTL，驱动从 SystemBuffer
+        # 读请求——输入与输出必须是**同一缓冲区、同长度**；独立小输出缓冲会让
+        # 驱动越界回写而崩溃（真机实测 access violation）。
+        buf = ctypes.create_string_buffer(data, len(data))
+        transferred = wt.DWORD(0)
+        if not DeviceIoControl(self.control_handle, ioctl, buf, len(data),
+                               buf, len(data), ctypes.byref(transferred), None):
             _raise_winerror(f"DeviceIoControl(0x{ioctl:08X}, area 0x{index:04X})")
-        return outbuf.raw[:returned.value]
+        if transferred.value != len(data):
+            raise RuntimeError(f"short Maskrom write: {transferred.value}/{len(data)}")
+        return b""
 
     def close(self):
         for attr in ("write_handle", "read_handle", "control_handle"):

@@ -84,7 +84,7 @@ def test_bulk_and_control_route_to_distinct_handles(monkeypatch):
 
     def fake_ioctl(handle, ioctl, inbuf, inlen, outbuf, outlen, returned, overlapped):
         used["ioctl"].append(handle)
-        returned._obj.value = 0
+        returned._obj.value = inlen     # buffered IOCTL 返回输入长度
         return 1
 
     monkeypatch.setattr(w, "ReadFile", fake_read)
