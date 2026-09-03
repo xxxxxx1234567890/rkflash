@@ -2,7 +2,7 @@
 
 基于开源 [rkdevtool](https://github.com/hiifong/rkdevtool)（Tauri/Rust）烧写能力重新实现的**零依赖 Python 引擎 + Claude Code 技能**，通过 RockUSB 协议在 Windows / Linux 上对 Rockchip SoC 完成 USB 烧写。
 
-引擎与参考实现逐字节对齐（协议 CBW/CSW、Loader IDBlock、RC4/CRC、RKAF/RKFW 解包、GPT/parameter、Android sparse）。协议字节、固件格式的实证细节见 `docs/firmware-formats.md` 与 `docs/superpowers/specs/`。
+引擎与参考实现逐字节对齐（协议 CBW/CSW、Loader IDBlock、RC4/CRC、RKAF/RKFW 解包、GPT/parameter、Android sparse）。协议字节、固件格式与真机实测的实证细节见 `docs/` 下的 `firmware-formats.md`、`rk3506-nand-findings.md`、`chips.md`。
 
 ## 能力
 
@@ -60,4 +60,4 @@ src/rkflash/
 └── cli.py        # 全部子命令入口
 ```
 
-设计规格与实现计划见 `docs/superpowers/specs/`、`docs/superpowers/plans/`。Claude Code 使用入口：`SKILL.md`。
+Claude Code 使用入口：`SKILL.md`；真机验证与发现的文档见 `docs/`。
